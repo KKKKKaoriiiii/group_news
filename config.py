@@ -44,6 +44,20 @@ class GroupNewsConfig(BaseConfig):
             description="整理群聊记录生成摘要的间隔（分钟）",
         )
 
+    @config_section("storage")
+    class StorageSection(SectionBase):
+        """存储与溢出控制配置。"""
+
+        summary_max_entries: int = Field(
+            default=-1,
+            ge=-1,
+            description="群摘要最大条目数（-1 表示不限制），超出后按 overflow_action 处理",
+        )
+        overflow_action: str = Field(
+            default="trim",
+            description="摘要溢出处理方式：trim 删除最旧条目 / publish 立刻加急发布新闻",
+        )
+
     @config_section("llm")
     class LLMSection(SectionBase):
         """大模型配置。"""
@@ -55,4 +69,5 @@ class GroupNewsConfig(BaseConfig):
 
     plugin: PluginSection = Field(default_factory=PluginSection)
     schedule: ScheduleSection = Field(default_factory=ScheduleSection)
+    storage: StorageSection = Field(default_factory=StorageSection)
     llm: LLMSection = Field(default_factory=LLMSection)

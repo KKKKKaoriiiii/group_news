@@ -144,9 +144,6 @@ class GroupNewsService(BaseService):
             messages: 待整理的消息列表。
         """
         model_name = self._get_model_name()
-        if not model_name:
-            logger.warning("未配置 LLM 模型，跳过摘要整理")
-            return
 
         chat_text = "\n".join(f"[{m['sender']}]: {m['content']}" for m in messages)
         user_prompt = f"以下是过去一段时间内的群聊记录：\n\n{chat_text}\n\n请将这些记录整理成简洁的摘要。"
@@ -168,16 +165,69 @@ class GroupNewsService(BaseService):
         await save_json(STORAGE_STORE, store_key, updated)
         logger.info(f"群 {group_key} 摘要已更新")
 
+        await self._check_summary_overflow(group_key, store_key, updated)
+
+    @staticmethod
+    def _count_summary_entries(summary: str) -> int:
+        """统计摘要中的条目数（按 --- 分隔线计数）。"""
+        if not summary or not summary.strip():
+            return 0
+        parts = [p.strip() for p in summary.split("\n--- ") if p.strip()]
+        return len(parts)
+
+    @staticmethod
+    def _trim_summary(summary: str, max_entries: int) -> str:
+        """删除最旧的摘要条目直到条目数不超过 max_entries。"""
+        if not summary or not summary.strip():
+            return ""
+        parts = [p.strip() for p in summary.split("\n--- ") if p.strip()]
+        if len(parts) <= max_entries:
+            return summary
+        trimmed = parts[-max_entries:]
+        return "\n--- ".join(trimmed)
+
+    async def _check_summary_overflow(
+        self, group_key: str, store_key: str, summary: str
+    ) -> None:
+        """检查摘要是否超过配置的条目上限并处理。
+
+        Args:
+            group_key: 群聊唯一标识。
+            store_key: 存储键名。
+            summary: 当前摘要文本。
+        """
+        try:
+            max_entries = self.plugin.config.storage.summary_max_entries
+        except Exception:
+            return
+
+        if max_entries < 1:
+            return
+
+        count = self._count_summary_entries(summary)
+        if count <= max_entries:
+            return
+
+        try:
+            action = self.plugin.config.storage.overflow_action
+        except Exception:
+            action = "trim"
+
+        if action == "publish":
+            logger.info(f"群 {group_key} 摘要已达 {count} 条（上限 {max_entries}），触发加急发布")
+            await self._publish_news_for_group(group_key, summary)
+            await delete_json(STORAGE_STORE, store_key)
+        else:
+            logger.info(f"群 {group_key} 摘要已达 {count} 条（上限 {max_entries}），裁剪最旧条目")
+            trimmed = self._trim_summary(summary, max_entries)
+            await save_json(STORAGE_STORE, store_key, trimmed)
+
     # ------------------------------------------------------------------
     # 每日新闻发布
     # ------------------------------------------------------------------
 
     async def publish_news_for_all_groups(self) -> None:
         """为所有有摘要的群聊生成并发布新闻。"""
-        model_name = self._get_model_name()
-        if not model_name:
-            logger.warning("未配置 LLM 模型，跳过新闻发布")
-            return
 
         # 先完成最后一次摘要整理
         await self.summarize_raw_buffers()
@@ -208,8 +258,6 @@ class GroupNewsService(BaseService):
             summary: 累积的群聊摘要文本。
         """
         model_name = self._get_model_name()
-        if not model_name:
-            return
 
         meta = self._group_meta.get(group_key)
         if not meta:
@@ -277,8 +325,6 @@ class GroupNewsService(BaseService):
             生成的新闻文本，如果无法生成则返回 None。
         """
         model_name = self._get_model_name()
-        if not model_name:
-            return None
 
         gk: str | None = None
         for key, meta in self._group_meta.items():
@@ -345,11 +391,13 @@ class GroupNewsService(BaseService):
         Returns:
             LLM 响应的文本内容，失败时返回空字符串。
         """
+        if not model_name:
+            model_name = get_model_set_by_task("actor").name
+            logger.warning(f"未配置 LLM 模型，默认使用 [{model_name}] 模型")
         try:
             model_set = get_model_set_by_name(model_name)
         except Exception:
-            model_set = get_model_set_by_task("actor")
-            logger.warning(f"model.toml 中未配置 [{request_name}], 默认使用actor模型")
+            logger.error(f"LLM 模型 [{model_name}] 不存在或无法加载")
             return ""
 
         try:
