@@ -10,30 +10,49 @@ from src.app.plugin_system.api.llm_api import (
     get_model_set_by_name,
     get_model_set_by_task,
 )
-from src.app.plugin_system.api.send_api import send_text
+from src.app.plugin_system.api.send_api import send_image
 from src.app.plugin_system.api.storage_api import delete_json, load_json, save_json
 from src.app.plugin_system.base import BaseService
 from src.app.plugin_system.types import ROLE, Text
 from src.kernel.llm import LLMPayload, LLMRequest, LLMContextManager
 from src.kernel.logger import get_logger
 
+from .renderer import images_to_base64_list, render_news_to_images
+
 logger = get_logger("group_news.service")
 
 STORAGE_STORE = "group_news"
 SUMMARY_KEY_PREFIX = "summary_"
-MAX_NEWS_CHARS = 1000
 
 SUMMARIZE_SYSTEM_PROMPT = """你是一个干练的群聊记录整理助手。请将以下群聊记录整理成简洁的摘要，保留关键事件、有趣对话、冲突八卦和重要信息。用简短条目列出即可，不需要过度展开。"""
 
-NEWS_SYSTEM_PROMPT = """你是一个油腔滑调、极其夸张的新闻编辑，专门编造群聊圈的"假新闻"。你的任务是把群友们的日常碎碎念加工成充斥着夸张修辞和幽默讽刺的新闻稿。
+NEWS_SYSTEM_PROMPT = """你是一个油腔滑调、极其夸张的新闻编辑，专门编造群聊圈的"假新闻"。你的任务是把群友们的日常碎碎念加工成充斥着夸张修辞和幽默讽刺的新闻稿。最终输出将排版为报纸风格图片，请严格按照以下 Markdown 格式输出：
 
-写作要求：
-1. 必须是纯文本，不能使用任何 Markdown 格式
-2. 必须包含一个吸睛的新闻标题，格式为"【群新闻】xxxx"
-3. 文风油腔滑调、极其夸张，充满新闻腔调的幽默讽刺
-4. 可以编造、夸大、扭曲事实
-5. 把普通聊天包装成惊天大新闻的感觉
-6. 总字数控制在800字以内"""
+**格式规则（严格遵守）：**
+1. 第一行必须是 "# 群新闻 · YYYY年MM月DD日" 格式的主标题
+2. 用 "## 爆炸标题" 格式划分每个新闻板块，标题要吸睛夸张
+3. 正文直接写自然段落，段落之间用一个空行分隔
+4. 用 "---" 作为板块之间的花式分隔线
+5. 可以用 "> 辛辣点评" 格式插入编辑的风趣吐槽
+6. 不要使用加粗、斜体、列表、代码块等其他 Markdown 语法
+7. 字数不限，尽情发挥，但正文中不要复现 # 或 ## 符号（它们只用作格式标记）
+
+**示例格式：**
+# 群新闻 · 2026年6月3日
+
+## 惊天头条：表情包大战席卷全群 参战人数突破历史纪录
+
+昨日晚间，本群爆发了一场史无前例的"表情包大战"...
+
+据前线记者不完全统计，群友小王单人贡献了47张表情包...
+
+---
+
+## 八卦速递：某群友的猫再次踩键盘 全群解码神秘代码
+
+知情人士透露，某群友的猫于昨晚22:13分再次作案...
+
+> 编辑点评：建议给猫配一台专属键盘，避免混淆视听。"""
 
 
 def _group_key(platform: str, group_id: str) -> str:
@@ -182,7 +201,7 @@ class GroupNewsService(BaseService):
             await delete_json(STORAGE_STORE, store_key)
 
     async def _publish_news_for_group(self, group_key: str, summary: str) -> None:
-        """为单个群聊生成新闻并发送。
+        """为单个群聊生成新闻图片并发送。
 
         Args:
             group_key: 群聊唯一标识。
@@ -198,10 +217,11 @@ class GroupNewsService(BaseService):
             return
 
         stream_id = meta.get("stream_id", "")
+        date_str = datetime.now().strftime("%Y年%m月%d日")
 
         user_prompt = (
             f"以下是过去一段时间群聊的摘要：\n\n{summary}\n\n"
-            "请根据以上摘要，生成今天的群新闻。记住要油腔滑调、极其夸张、充满新闻腔调的幽默讽刺！"
+            "请根据以上摘要，严格按照格式规则生成今天的群新闻。"
         )
 
         news_text = await self._call_llm(
@@ -213,18 +233,35 @@ class GroupNewsService(BaseService):
         if not news_text:
             return
 
-        # 截断过长的新闻
-        if len(news_text) > MAX_NEWS_CHARS:
-            news_text = news_text[:MAX_NEWS_CHARS]
-
         try:
-            success = await send_text(news_text, stream_id=stream_id)
-            if success:
-                logger.info(f"群 {group_key} 新闻已发布")
-            else:
-                logger.error(f"群 {group_key} 新闻发送失败")
+            images = render_news_to_images(news_text, date_str=date_str)
+        except ImportError as exc:
+            logger.warning(f"缺少渲染依赖，降级为文本发送: {exc}")
+            try:
+                from src.app.plugin_system.api.send_api import send_text
+
+                text_preview = news_text[:500]
+                await send_text(f"【群新闻 · {date_str}】\n\n{text_preview}", stream_id=stream_id)
+            except Exception:
+                pass
+            return
         except Exception:
-            logger.error(f"群 {group_key} 新闻发送异常")
+            logger.exception("新闻图片渲染失败")
+            return
+
+        if not images:
+            return
+
+        base64_list = images_to_base64_list(images)
+        for i, b64 in enumerate(base64_list):
+            try:
+                success = await send_image(b64, stream_id=stream_id)
+                if not success:
+                    logger.error(f"群 {group_key} 新闻图片第 {i + 1} 页发送失败")
+            except Exception:
+                logger.exception(f"群 {group_key} 新闻图片第 {i + 1} 页发送异常")
+
+        logger.info(f"群 {group_key} 新闻已发布（{len(base64_list)} 张图片）")
 
     # ------------------------------------------------------------------
     # 工具接口：手动触发新闻生成
@@ -264,7 +301,7 @@ class GroupNewsService(BaseService):
 
         user_prompt = (
             f"以下是过去一段时间群聊的摘要：\n\n{summary}\n\n"
-            "请根据以上摘要，生成今天的群新闻。记住要油腔滑调、极其夸张、充满新闻腔调的幽默讽刺！"
+            "请根据以上摘要，严格按照格式规则生成今天的群新闻。"
         )
 
         news_text = await self._call_llm(
@@ -276,10 +313,8 @@ class GroupNewsService(BaseService):
         if not news_text:
             return None
 
-        if len(news_text) > MAX_NEWS_CHARS:
-            news_text = news_text[:MAX_NEWS_CHARS]
-
         return news_text
+
 
     # ------------------------------------------------------------------
     # 内部辅助
@@ -328,6 +363,7 @@ class GroupNewsService(BaseService):
         except Exception:
             logger.error(f"LLM 请求发送失败 [{request_name}]")
             return ""
+
 
         content = response.message or response.reasoning_content
         if not content:

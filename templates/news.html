@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Microsoft YaHei', '微软雅黑', 'SimHei', '黑体',
+                 'Noto Sans CJK SC', 'WenQuanYi Micro Hei', sans-serif;
+    font-size: 15px;
+    line-height: 2.0;
+    color: #2c2c2c;
+    background: #fefefe;
+    padding: 30px 36px 40px 36px;
+    max-width: 740px;
+    margin: 0 auto;
+  }
+
+  /* ========== 报头 ========== */
+  .header {
+    text-align: center;
+    padding: 16px 0 10px 0;
+    border-bottom: 4px double #1a1a2e;
+    margin-bottom: 22px;
+  }
+
+  .header .masthead {
+    font-size: 30px;
+    font-weight: 900;
+    letter-spacing: 8px;
+    color: #1a1a2e;
+  }
+
+  .header .date-line {
+    font-size: 12px;
+    color: #888;
+    margin-top: 6px;
+    letter-spacing: 3px;
+  }
+
+  /* ========== 头条标题 ========== */
+  .main-title {
+    font-size: 24px;
+    font-weight: 900;
+    color: #c0392b;
+    text-align: center;
+    padding: 12px 0 8px 0;
+    margin-bottom: 16px;
+    line-height: 1.4;
+    border-bottom: 2px solid #e74c3c;
+  }
+
+  /* ========== 板块标题栏 ========== */
+  .section-title-bar {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #fff;
+    padding: 8px 16px;
+    margin: 24px 0 12px 0;
+    border-left: 5px solid #e74c3c;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-title-bar .section-icon {
+    font-size: 18px;
+    color: #e74c3c;
+  }
+
+  .section-title-bar h2 {
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: #fff;
+  }
+
+  /* ========== 正文 ========== */
+  p {
+    text-indent: 2em;
+    margin-bottom: 8px;
+    text-align: justify;
+  }
+
+  /* ========== 引用/编辑点评 ========== */
+  blockquote.editor-note {
+    background: linear-gradient(135deg, #fff8e1 0%, #fff3cd 100%);
+    border-left: 4px solid #f39c12;
+    margin: 14px 0;
+    padding: 12px 18px 12px 16px;
+    position: relative;
+    font-style: italic;
+    color: #7d6608;
+  }
+
+  blockquote.editor-note .quote-mark {
+    position: absolute;
+    left: 8px;
+    top: 4px;
+    font-size: 30px;
+    color: #f39c12;
+    opacity: 0.3;
+    line-height: 1;
+    font-style: normal;
+  }
+
+  blockquote.editor-note p {
+    text-indent: 0;
+    margin: 0;
+    font-size: 14px;
+  }
+
+  /* ========== 花式分隔线 ========== */
+  .fancy-divider {
+    text-align: center;
+    margin: 18px 0;
+    color: #bbb;
+    font-size: 14px;
+    letter-spacing: 10px;
+  }
+
+  /* ========== 页脚 ========== */
+  .page-footer {
+    text-align: center;
+    margin-top: 30px;
+    padding-top: 12px;
+    border-top: 1px solid #ddd;
+    font-size: 11px;
+    color: #aaa;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="masthead">$title</div>
+  <div class="date-line">$date</div>
+</div>
+
+$content
+
+<div class="page-footer">$page_info</div>
+
+</body>
+</html>

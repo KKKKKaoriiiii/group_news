@@ -1,7 +1,7 @@
 {
     "name": "group_news",
     "display_name": "文文新闻(fake news生成器)",
-    "version": "1.0.1",
+    "version": "2.0.0",
     "description": "定期整理群聊记录，编造夸张幽默的群内大新闻摘要并公开发布",
     "author": "KKKKKaoriiiii",
     "dependencies": {
@@ -24,7 +24,7 @@
     ],
     "entry_point": "plugin.py",
     "min_core_version": "1.0.0",
-    "python_dependencies": [],
+    "python_dependencies": ["playwright", "pillow"],
     "dependencies_required": true,
     "categories": ["tool", "fun"],
     "tags": ["news", "summary", "group_chat", "content_creation"]
