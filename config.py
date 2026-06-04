@@ -39,7 +39,7 @@ class GroupNewsConfig(BaseConfig):
         )
         summarize_interval_minutes: int = Field(
             default=60,
-            ge=10,
+            ge=1,
             le=1440,
             description="整理群聊记录生成摘要的间隔（分钟）",
         )

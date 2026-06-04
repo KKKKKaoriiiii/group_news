@@ -74,6 +74,6 @@ class GroupNewsCollector(BaseEventHandler):
                 content=content,
             )
         except Exception:
-            logger.exception("收集群聊消息失败")
+            logger.error("收集群聊消息失败")
 
         return EventDecision.SUCCESS, params

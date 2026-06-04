@@ -5,12 +5,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from src.app.plugin_system.api.llm_api import create_llm_request, get_model_set_by_name
+from src.app.plugin_system.api.llm_api import (
+    create_llm_request,
+    get_model_set_by_name,
+    get_model_set_by_task,
+)
 from src.app.plugin_system.api.send_api import send_text
 from src.app.plugin_system.api.storage_api import delete_json, load_json, save_json
 from src.app.plugin_system.base import BaseService
 from src.app.plugin_system.types import ROLE, Text
-from src.kernel.llm import LLMPayload, LLMRequest
+from src.kernel.llm import LLMPayload, LLMRequest, LLMContextManager
 from src.kernel.logger import get_logger
 
 logger = get_logger("group_news.service")
@@ -91,10 +95,12 @@ class GroupNewsService(BaseService):
                 "group_id": group_id,
                 "stream_id": stream_id,
             }
-        self._raw_buffer[gk].append({
-            "sender": sender_name,
-            "content": content,
-        })
+        self._raw_buffer[gk].append(
+            {
+                "sender": sender_name,
+                "content": content,
+            }
+        )
 
     # ------------------------------------------------------------------
     # 定时摘要整理
@@ -123,9 +129,7 @@ class GroupNewsService(BaseService):
             logger.warning("未配置 LLM 模型，跳过摘要整理")
             return
 
-        chat_text = "\n".join(
-            f"[{m['sender']}]: {m['content']}" for m in messages
-        )
+        chat_text = "\n".join(f"[{m['sender']}]: {m['content']}" for m in messages)
         user_prompt = f"以下是过去一段时间内的群聊记录：\n\n{chat_text}\n\n请将这些记录整理成简洁的摘要。"
 
         summary_text = await self._call_llm(
@@ -177,9 +181,7 @@ class GroupNewsService(BaseService):
             store_key = _summary_store_key(gk)
             await delete_json(STORAGE_STORE, store_key)
 
-    async def _publish_news_for_group(
-        self, group_key: str, summary: str
-    ) -> None:
+    async def _publish_news_for_group(self, group_key: str, summary: str) -> None:
         """为单个群聊生成新闻并发送。
 
         Args:
@@ -222,7 +224,7 @@ class GroupNewsService(BaseService):
             else:
                 logger.error(f"群 {group_key} 新闻发送失败")
         except Exception:
-            logger.exception(f"群 {group_key} 新闻发送异常")
+            logger.error(f"群 {group_key} 新闻发送异常")
 
     # ------------------------------------------------------------------
     # 工具接口：手动触发新闻生成
@@ -310,16 +312,27 @@ class GroupNewsService(BaseService):
         """
         try:
             model_set = get_model_set_by_name(model_name)
+        except Exception:
+            model_set = get_model_set_by_task("actor")
+            logger.warning(f"model.toml 中未配置 [{request_name}], 默认使用actor模型")
+            return ""
+
+        try:
+            context_manager = LLMContextManager()
             request: LLMRequest = create_llm_request(
-                model_set, request_name=request_name
+                model_set, request_name=request_name, context_manager=context_manager
             )
             request.add_payload(LLMPayload(ROLE.SYSTEM, Text(system_prompt)))
             request.add_payload(LLMPayload(ROLE.USER, Text(user_prompt)))
-            response = await request.send()
-            return response.message or ""
+            response = await request.send(stream=False)
         except Exception:
-            logger.exception(f"LLM 调用失败 [{request_name}]")
+            logger.error(f"LLM 请求发送失败 [{request_name}]")
             return ""
+
+        content = response.message or response.reasoning_content
+        if not content:
+            logger.warning(f"LLM 返回空响应 [{request_name}]")
+        return content
 
     async def _load_summary(self, store_key: str) -> str | None:
         """从持久化存储加载摘要。"""

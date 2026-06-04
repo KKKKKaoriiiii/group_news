@@ -56,6 +56,7 @@ class GroupNewsPlugin(BasePlugin):
 
         self._publish_schedule_id: str | None = None
         self._summarize_schedule_id: str | None = None
+        self._summarize_once_id: str | None = None
         self._last_publish_date: str = ""
 
         # 等待 scheduler 就绪后注册任务
@@ -70,7 +71,7 @@ class GroupNewsPlugin(BasePlugin):
         from src.kernel.scheduler import get_unified_scheduler
 
         scheduler = get_unified_scheduler()
-        for sid in [self._publish_schedule_id, self._summarize_schedule_id]:
+        for sid in [self._publish_schedule_id, self._summarize_schedule_id, self._summarize_once_id]:
             if sid:
                 try:
                     await scheduler.remove_schedule(sid)
@@ -79,6 +80,7 @@ class GroupNewsPlugin(BasePlugin):
 
         self._publish_schedule_id = None
         self._summarize_schedule_id = None
+        self._summarize_once_id = None
 
     async def _register_schedule_when_ready(self) -> None:
         """等待 scheduler 运行后注册周期任务。"""
@@ -89,19 +91,28 @@ class GroupNewsPlugin(BasePlugin):
         # 等待 scheduler 启动（Bot.run() 之后才可用）
         for _ in range(600):
             try:
-                # 定时摘要整理任务
+                # 定时摘要整理任务：先立即执行一次，之后按间隔循环
                 interval_sec = self.config.schedule.summarize_interval_minutes * 60
+                self._summarize_once_id = await scheduler.create_schedule(
+                    callback=self._summarize_job,
+                    trigger_type=TriggerType.TIME,
+                    trigger_config={"delay_seconds": 5},
+                    is_recurring=False,
+                    task_name="group_news_summarize_once",
+                    force_overwrite=True,
+                )
                 self._summarize_schedule_id = await scheduler.create_schedule(
                     callback=self._summarize_job,
                     trigger_type=TriggerType.TIME,
                     trigger_config={"interval_seconds": interval_sec},
                     is_recurring=True,
-                    task_name="group_news_summarize",
+                    task_name="group_news_summarize_recurring",
                     force_overwrite=True,
                 )
 
                 # 每日发布任务
                 await self._schedule_next_publish(scheduler)
+                logger.info(f"群新闻定时任务已注册（摘要间隔 {interval_sec // 60} 分钟）")
                 return
             except RuntimeError:
                 await asyncio.sleep(0.5)
@@ -159,9 +170,14 @@ class GroupNewsPlugin(BasePlugin):
             return
 
         try:
+            count = sum(len(buf) for buf in self._news_service._raw_buffer.values())
+            if count == 0:
+                logger.debug("摘要整理：无新消息，跳过")
+                return
+            logger.info(f"摘要整理：开始处理 {count} 条消息")
             await self._news_service.summarize_raw_buffers()
-        except Exception:
-            logger.exception("摘要整理任务异常")
+        except Exception as e:
+            logger.error(f"摘要整理任务异常:{e}")
 
     async def _publish_job(self) -> None:
         """每日新闻发布任务回调。"""
@@ -176,8 +192,8 @@ class GroupNewsPlugin(BasePlugin):
 
         try:
             await self._news_service.publish_news_for_all_groups()
-        except Exception:
-            logger.exception("新闻发布任务异常")
+        except Exception as e:
+            logger.error(f"新闻发布任务异常:{e}")
 
         self._last_publish_date = today
         await self._schedule_next_publish()
