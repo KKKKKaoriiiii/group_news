@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from io import BytesIO
 from pathlib import Path
 from string import Template
 
-# A4 210mm × 297mm，150 DPI 下的像素尺寸
+# A4 宽度参考值（210mm，150 DPI 下的像素宽度）
 _A4_WIDTH_PX = 1240
-_A4_HEIGHT_PX = 1754
+
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -160,17 +159,16 @@ def build_news_html(
 
 
 def html_to_images(html_str: str, *, dpi: int = 150) -> list[bytes]:
-    """将 HTML 字符串渲染为 PNG 图片列表（每页一张）。
+    """将 HTML 字符串渲染为 PNG 长图。
 
-    使用 Playwright 无头 Chromium 渲染全页截图，再按 A4 高宽比
-    垂直切割为多张页面图片。
+    使用 Playwright 无头 Chromium 渲染全页截图，直接输出为单张长图。
 
     Args:
         html_str: 完整 HTML 字符串。
         dpi: 输出图片 DPI。
 
     Returns:
-        每页 PNG 图片的 bytes 列表。
+        包含单张 PNG 图片 bytes 的列表。
 
     Raises:
         ImportError: 缺少 playwright 依赖。
@@ -183,10 +181,8 @@ def html_to_images(html_str: str, *, dpi: int = 150) -> list[bytes]:
             "缺少 playwright 依赖，请执行: uv add playwright && uv run playwright install chromium"
         ) from None
 
-    # 设 viewport 宽度匹配 A4，用 device_scale_factor 提升 DPI
     scale_factor = dpi / 96.0
     viewport_width = int(_A4_WIDTH_PX / scale_factor)
-    crop_height = int(_A4_HEIGHT_PX / scale_factor)
 
     try:
         with sync_playwright() as pw:
@@ -198,35 +194,15 @@ def html_to_images(html_str: str, *, dpi: int = 150) -> list[bytes]:
             page = context.new_page()
             page.set_content(html_str, wait_until="networkidle")
 
-            content_height = page.evaluate(
-                "() => document.body.scrollHeight"
-            )
-            page.set_viewport_size(
-                {"width": viewport_width, "height": content_height}
-            )
+            content_height = page.evaluate("() => document.body.scrollHeight")
+            page.set_viewport_size({"width": viewport_width, "height": content_height})
 
             screenshot_bytes = page.screenshot(full_page=True)
-
             browser.close()
     except Exception as exc:
         raise RuntimeError(f"Playwright 渲染失败: {exc}") from exc
 
-    # 用 Pillow 加载截图并按 A4 高度切割
-    from PIL import Image
-
-    full_img = Image.open(BytesIO(screenshot_bytes))
-
-    images: list[bytes] = []
-    y = 0
-    while y < full_img.height:
-        bottom = min(y + crop_height, full_img.height)
-        page_img = full_img.crop((0, y, full_img.width, bottom))
-        buf = BytesIO()
-        page_img.save(buf, format="PNG")
-        images.append(buf.getvalue())
-        y = bottom
-
-    return images
+    return [screenshot_bytes]
 
 
 def render_news_to_images(
