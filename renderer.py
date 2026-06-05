@@ -158,7 +158,7 @@ def build_news_html(
     )
 
 
-def html_to_images(html_str: str, *, dpi: int = 150) -> list[bytes]:
+async def html_to_images(html_str: str, *, dpi: int = 150) -> list[bytes]:
     """将 HTML 字符串渲染为 PNG 长图。
 
     使用 Playwright 无头 Chromium 渲染全页截图，直接输出为单张长图。
@@ -175,7 +175,7 @@ def html_to_images(html_str: str, *, dpi: int = 150) -> list[bytes]:
         RuntimeError: 渲染过程失败。
     """
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.async_api import async_playwright
     except ImportError:
         raise ImportError(
             "缺少 playwright 依赖，请执行: uv add playwright && uv run playwright install chromium"
@@ -185,27 +185,27 @@ def html_to_images(html_str: str, *, dpi: int = 150) -> list[bytes]:
     viewport_width = int(_A4_WIDTH_PX / scale_factor)
 
     try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch()
-            context = browser.new_context(
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch()
+            context = await browser.new_context(
                 viewport={"width": viewport_width, "height": 800},
                 device_scale_factor=scale_factor,
             )
-            page = context.new_page()
-            page.set_content(html_str, wait_until="networkidle")
+            page = await context.new_page()
+            await page.set_content(html_str, wait_until="networkidle")
 
-            content_height = page.evaluate("() => document.body.scrollHeight")
-            page.set_viewport_size({"width": viewport_width, "height": content_height})
+            content_height = await page.evaluate("() => document.body.scrollHeight")
+            await page.set_viewport_size({"width": viewport_width, "height": content_height})
 
-            screenshot_bytes = page.screenshot(full_page=True)
-            browser.close()
+            screenshot_bytes = await page.screenshot(full_page=True)
+            await browser.close()
     except Exception as exc:
         raise RuntimeError(f"Playwright 渲染失败: {exc}") from exc
 
     return [screenshot_bytes]
 
 
-def render_news_to_images(
+async def render_news_to_images(
     text: str,
     *,
     date_str: str = "",
@@ -227,7 +227,7 @@ def render_news_to_images(
 
     total = max(1, len(blocks) // 6 + 1)
     html = build_news_html(blocks, date_str=date_str, page_num=1, total_pages=total)
-    return html_to_images(html, dpi=dpi)
+    return await html_to_images(html, dpi=dpi)
 
 
 def images_to_base64_list(images: list[bytes]) -> list[str]:

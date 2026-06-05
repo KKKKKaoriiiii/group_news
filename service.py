@@ -24,7 +24,13 @@ logger = get_logger("group_news.service")
 STORAGE_STORE = "group_news"
 SUMMARY_KEY_PREFIX = "summary_"
 
-SUMMARIZE_SYSTEM_PROMPT = """你是一个干练的群聊记录整理助手。请将以下群聊记录整理成简洁的摘要，保留关键事件、有趣对话、冲突八卦和重要信息。用简短条目列出即可，不需要过度展开。"""
+SUMMARIZE_SYSTEM_PROMPT = """你是一个干练的群聊记录整理助手。请将以下群聊记录整理成简洁的摘要，保留关键事件、有趣对话、冲突八卦和重要信息。
+
+**格式规则（严格遵守）：**
+1. 摘要内容必须是纯文本，不要使用任何 Markdown 语法或特殊格式
+2. 摘要内容的结构应该分为几个自然段，每个自然段描述一个独立的事件或话题
+3. 摘要本身不需要标题或日期等元信息，直接从正文开始
+"""
 
 NEWS_SYSTEM_PROMPT = """你是一个油腔滑调、极其夸张的新闻编辑，专门编造群聊圈的"假新闻"。你的任务是把群友们的日常碎碎念加工成充斥着夸张修辞和幽默讽刺的新闻稿。最终输出将排版为报纸风格图片，请严格按照以下 Markdown 格式输出：
 
@@ -282,7 +288,7 @@ class GroupNewsService(BaseService):
             return
 
         try:
-            images = render_news_to_images(news_text, date_str=date_str)
+            images = await render_news_to_images(news_text, date_str=date_str)
         except ImportError as exc:
             logger.warning(f"缺少渲染依赖，降级为文本发送: {exc}")
             try:
@@ -290,11 +296,11 @@ class GroupNewsService(BaseService):
 
                 text_preview = news_text[:500]
                 await send_text(f"【群新闻 · {date_str}】\n\n{text_preview}", stream_id=stream_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error(f"群 {group_key} 新闻文本发送异常: {exc}")
             return
-        except Exception:
-            logger.exception("新闻图片渲染失败")
+        except Exception as exc:
+            logger.error(f"新闻图片渲染失败: {exc}")
             return
 
         if not images:
@@ -306,8 +312,8 @@ class GroupNewsService(BaseService):
                 success = await send_image(b64, stream_id=stream_id)
                 if not success:
                     logger.error(f"群 {group_key} 新闻图片第 {i + 1} 页发送失败")
-            except Exception:
-                logger.exception(f"群 {group_key} 新闻图片第 {i + 1} 页发送异常")
+            except Exception as exc:
+                logger.error(f"群 {group_key} 新闻图片第 {i + 1} 页发送异常: {exc}")
 
         logger.info(f"群 {group_key} 新闻已发布（{len(base64_list)} 张图片）")
 
@@ -392,13 +398,14 @@ class GroupNewsService(BaseService):
             LLM 响应的文本内容，失败时返回空字符串。
         """
         if not model_name:
-            model_name = get_model_set_by_task("actor").name
+            model_set = get_model_set_by_task("actor")
             logger.warning(f"未配置 LLM 模型，默认使用 [{model_name}] 模型")
-        try:
-            model_set = get_model_set_by_name(model_name)
-        except Exception:
-            logger.error(f"LLM 模型 [{model_name}] 不存在或无法加载")
-            return ""
+        else:
+            try:
+                model_set = get_model_set_by_name(model_name)
+            except Exception:
+                logger.error(f"LLM 模型 [{model_name}] 不存在或无法加载")
+                return ""
 
         try:
             context_manager = LLMContextManager()
@@ -412,11 +419,10 @@ class GroupNewsService(BaseService):
             logger.error(f"LLM 请求发送失败 [{request_name}]")
             return ""
 
-
-        content = response.message or response.reasoning_content
+        content = response.message
         if not content:
             logger.warning(f"LLM 返回空响应 [{request_name}]")
-        return content
+        return content or ""
 
     async def _load_summary(self, store_key: str) -> str | None:
         """从持久化存储加载摘要。"""
